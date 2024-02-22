@@ -1,5 +1,5 @@
 from django import forms
-from .models import Transaction
+from .models import Transaction,Transfer
 class TransactionForm(forms.ModelForm):
     class Meta:
         model = Transaction
@@ -62,3 +62,29 @@ class LoanRequestForm(TransactionForm):
         amount = self.cleaned_data.get('amount')
 
         return amount
+    
+    
+
+class TransferForm(forms.ModelForm):
+    class Meta:
+        model = Transfer
+        fields = ["receiver", "amount"]
+    
+    def __init__(self, *args, **kwargs):
+        self.account = kwargs.pop('account')
+        super().__init__(*args, **kwargs)
+        
+        self.fields['receiver'].widget.attrs.update({
+            'class': 'shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight border rounded-md border-gray-500 focus:outline-none focus:shadow-outline',
+            'placeholder': 'Receiver Account Number'
+        })
+        self.fields['amount'].widget.attrs.update({
+            'class': 'shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight border rounded-md border-gray-500 focus:outline-none focus:shadow-outline',
+            'placeholder': 'Amount'
+        })
+        
+    def save(self, commit=True):
+        self.instance.sender = self.account
+        return super().save()
+       
+        

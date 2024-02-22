@@ -1,11 +1,12 @@
 from django.shortcuts import render,redirect
 from django.contrib.auth import  login,logout
 # Create your views here.
-from .forms import UserRegistrationFrom,UserUpdateForm
+from .forms import UserRegistrationFrom,UserUpdateForm,CustomPasswordChangeForm
 from django.views.generic import FormView
 from django.urls import reverse_lazy
 from django.contrib.auth.views import LoginView,LogoutView
-
+from django.contrib import messages
+from django.contrib.auth.mixins import LoginRequiredMixin
 
 class UserRegistationView(FormView):
     template_name ="accounts/user_registration.html"
@@ -53,3 +54,20 @@ class UserBankAccountUpdateView(View):
             return redirect(reverse_lazy('profile'))
         
         return render(request,self.template_name,{'form':form})
+    
+    
+class PasswordChangeView(LoginRequiredMixin,View):
+    
+    def get(self,request):
+        form = CustomPasswordChangeForm(user=request.user)
+        print(form)
+        return render(request,'accounts/pass_change.html',{'form': form})
+    
+
+    def post(self,request):
+        form = CustomPasswordChangeForm(user=request.user,data=request.POST)
+        if form.is_valid():
+            form.save()
+            messages.success(request, 'Password Updated successfully')
+            return redirect('profile')
+        return render(request, 'accounts/pass_change.html', {'form': form}) 

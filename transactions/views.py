@@ -1,12 +1,12 @@
 from django.shortcuts import render,redirect,get_object_or_404
 
 # Create your views here.
-from django.views.generic import CreateView,ListView,View
+from django.views.generic import CreateView,ListView,View,FormView
 from django.contrib.auth.mixins import LoginRequiredMixin 
 
-from .models import Transaction 
-from .forms import DepositForm,LoanRequestForm,WithdrawForm
-from .constants import DEPOSIT,WITHDRAWAL,LOAN_PAID,LOAN
+from .models import Transaction,UserBankAccount
+from .forms import DepositForm,LoanRequestForm,WithdrawForm,TransferForm
+from .constants import DEPOSIT,WITHDRAWAL,LOAN_PAID,LOAN,SEND,RECEIVE
 from django.http import HttpResponse
 
 from django.contrib import messages 
@@ -14,6 +14,7 @@ from datetime import datetime
 from django.db.models import Sum
 from django.urls import reverse_lazy
 
+from .models import Bank
 
 from django.core.mail import EmailMessage,EmailMultiAlternatives
 from django.template.loader import render_to_string
@@ -21,7 +22,6 @@ from django.template.loader import render_to_string
 # ei view ke inherit kore amra deposite , withdraw,loan request er kaj korbo 
 
 def send_transaction_email(user,amount,subject,template):
-        
         message = render_to_string(template,{
             'user':user,
             'amount':amount, 
@@ -29,6 +29,7 @@ def send_transaction_email(user,amount,subject,template):
         send_email = EmailMultiAlternatives(subject,'',to=[user.email])
         send_email.attach_alternative(message,"text/html")
         send_email.send()
+        
 class TransactionCreateMixin(LoginRequiredMixin, CreateView):
     template_name = 'transactions/transaction_form.html'
     model = Transaction
@@ -43,7 +44,7 @@ class TransactionCreateMixin(LoginRequiredMixin, CreateView):
         return kwargs
 
     def get_context_data(self, **kwargs):
-        context = super().get_context_data(**kwargs) # template e context data pass kora
+        context = super().get_context_data(**kwargs) 
         context.update({
             'title': self.title
         })
@@ -99,7 +100,14 @@ class WithdrawMoneyView(TransactionCreateMixin):
     def form_valid(self, form):
         amount = form.cleaned_data.get('amount')
 
+        bank = Bank.objects.get(name="mamar_bank")
+        
+        if bank.is_bankrupt is True:
+            messages.error(self.request, "Bank has gone bankrupt.")
+            return redirect("home")
+
         # Check if the withdrawal amount is greater than the available balance
+        
         if amount > self.request.user.account.balance:
             messages.error(
                 self.request,
@@ -209,3 +217,67 @@ class LoanListView(LoginRequiredMixin,ListView):
         queryset = Transaction.objects.filter(account=user_account,transaction_type=3)
         return queryset
         
+class TransferMoneyView(CreateView, LoginRequiredMixin):
+    form_class = TransferForm
+    template_name = 'transactions/transfer_money.html'
+    success_url = reverse_lazy('transaction_report')
+    
+    def get_form_kwargs(self):
+        kwargs = super().get_form_kwargs()
+        kwargs.update({
+            'account': self.request.user.account
+        })
+        return kwargs
+    
+    def form_valid(self, form):
+        amount = form.cleaned_data.get('amount')
+        receiver = form.cleaned_data.get('receiver')
+        
+        account = self.request.user.account
+        sender = self.request.user  
+        
+        if receiver.account == account:
+            messages.error(self.request, 'You cannot transfer money to your own account')
+
+        if amount < account.balance:
+            account.balance -= amount
+            receiver.account.balance += amount
+            account.save(update_fields=['balance'])
+            receiver.account.save(update_fields=['balance'])
+            
+            
+            sender_transaction = Transaction.objects.create(
+                account=account,
+                amount=amount, 
+                balance_after_transaction=account.balance,
+                transaction_type=SEND, 
+                sender = account,
+                receiver = receiver.account
+            )
+
+            receiver_transaction = Transaction.objects.create(
+                account=receiver.account,
+                amount=amount,
+                balance_after_transaction=receiver.account.balance,
+                transaction_type=RECEIVE,
+                sender = account,
+                receiver = receiver.account
+            )
+            sender_transaction.save()
+            receiver_transaction.save()
+            messages.success(
+                self.request,
+                f'{"{:,.2f}".format(float(amount))}$ was transferred from your account successfully'  
+            )
+            print(receiver)
+            print(self.request.user)
+            send_transaction_email(sender, amount, "Transfer Message", "transactions/transfer_email.html")
+            send_transaction_email(receiver, amount, "Transfer Message", "transactions/transfer_email.html")
+            return super().form_valid(form)
+        else:
+            messages.error(self.request, "Transfer amount more than account balance.")
+            return redirect("home")
+    
+        
+        
+    
